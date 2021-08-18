@@ -1,0 +1,25 @@
+.App {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: Comic Sans MS;
+}
+
+.App__game-field-wrapper {
+  width: 520px;
+  height: 260px;
+  background-size: 20px 20px;
+  background-image: linear-gradient(to right, #eaedee 1px, transparent 1px),
+    linear-gradient(to bottom, #eaedee 1px, transparent 1px);
+  background-position: 10px 10px;
+  margin: 0;
+  box-sizing: border-box;
+  display: block;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+
+.Game-object__rect {
+  fill: transparent;
+  stroke-linejoin: round;
+  stroke-width: 2px;
+}
