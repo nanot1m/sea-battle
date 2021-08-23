@@ -1,13 +1,13 @@
-import { PointerEventHandler, PointerEvent } from "react";
-import { ReactNode, useState } from "react";
 import "./App.css";
+import { PointerEventHandler, PointerEvent, ReactNode, useState } from "react";
+import { normalizeById, shiftBy, moveTo, flip, Orientation } from "./lib";
 
 const SQUARE_SIZE = 20;
 const RANGE_1_10 = Array.from(Array(10)).map((_, i) => i + 1);
 const LETTERS = ["а", "б", "в", "г", "д", "е", "ж", "з", "и", "к"];
 
-const GAME_WIDTH = 36;
-const GAME_HEIGHT = 16;
+const GAME_WIDTH = 24;
+const GAME_HEIGHT = 14;
 
 const Colors = {
   blue: "#3399cc",
@@ -125,7 +125,7 @@ function Ship(props: {
   x: number;
   y: number;
   size: number;
-  direction: "horizontal" | "vertical";
+  orientation: Orientation;
   color: keyof typeof Colors;
   isDraggable?: boolean;
   onPointerDown?: PointerEventHandler<SVGElement>;
@@ -133,7 +133,7 @@ function Ship(props: {
 }) {
   let width = 1;
   let height = 1;
-  if (props.direction === "horizontal") {
+  if (props.orientation === "horizontal") {
     width = props.size;
   } else {
     height = props.size;
@@ -164,34 +164,36 @@ type ShipType = {
   x: number;
   y: number;
   size: number;
-  direction: "horizontal" | "vertical";
+  orientation: Orientation;
 };
 
 const AVAILABLE_SHIPS: ShipType[] = [
-  { size: 4, x: 13, y: 4 },
-  { size: 3, x: 13, y: 6 },
-  { size: 3, x: 17, y: 6 },
-  { size: 2, x: 13, y: 8 },
-  { size: 2, x: 16, y: 8 },
-  { size: 2, x: 19, y: 8 },
-  { size: 1, x: 13, y: 10 },
-  { size: 1, x: 15, y: 10 },
-  { size: 1, x: 17, y: 10 },
-  { size: 1, x: 19, y: 10 },
+  { size: 4, x: 0, y: 0 },
+  { size: 3, x: 0, y: 2 },
+  { size: 3, x: 4, y: 2 },
+  { size: 2, x: 0, y: 4 },
+  { size: 2, x: 3, y: 4 },
+  { size: 2, x: 5, y: 0 },
+  { size: 1, x: 0, y: 6 },
+  { size: 1, x: 2, y: 6 },
+  { size: 1, x: 4, y: 6 },
+  { size: 1, x: 6, y: 4 },
 ].map((x, idx) => ({
   ...x,
   id: idx,
-  direction: "horizontal",
+  orientation: "horizontal",
 }));
 
 function App() {
-  const [ships, setShips] = useState(AVAILABLE_SHIPS);
+  const [ships, setShips] = useState(() =>
+    normalizeById(AVAILABLE_SHIPS.map(shiftBy(2, 3)))
+  );
   const [draggingShip, setDraggingShip] = useState<number | null>(null);
 
   const handlePointerDown =
     (id: number) => (downEvent: PointerEvent<SVGElement>) => {
       downEvent.preventDefault();
-      const targetShip = ships.find((x) => x.id === id);
+      const targetShip = ships.entries[id];
       if (targetShip == null) {
         return;
       }
@@ -223,9 +225,9 @@ function App() {
 
         if (isDragging) {
           const width =
-            targetShip.direction === "vertical" ? 1 : targetShip.size;
+            targetShip.orientation === "vertical" ? 1 : targetShip.size;
           const height =
-            targetShip.direction === "horizontal" ? 1 : targetShip.size;
+            targetShip.orientation === "horizontal" ? 1 : targetShip.size;
 
           const targetX = Math.min(
             GAME_WIDTH - width - 1,
@@ -236,34 +238,27 @@ function App() {
             Math.max(0, initialShipY + Math.round(dy / SQUARE_SIZE))
           );
 
-          setShips((ships) =>
-            ships
-              .filter((ship) => ship.id !== id)
-              .concat({
-                ...targetShip,
-                x: targetX,
-                y: targetY,
-              } as ShipType)
-          );
+          setShips((ships) => ({
+            ...ships,
+            entries: {
+              ...ships.entries,
+              [id]: moveTo(targetX, targetY)(targetShip),
+            },
+          }));
         }
       }
 
       function upHandler() {
         if (!isDragging) {
           setShips((ships) => {
-            const targetShip = ships.find((x) => x.id === id);
+            const targetShip = ships.entries[id];
             if (targetShip == null) {
               return ships;
             }
-            return ships
-              .filter((ship) => ship.id !== id)
-              .concat({
-                ...targetShip,
-                direction:
-                  targetShip.direction === "horizontal"
-                    ? "vertical"
-                    : "horizontal",
-              } as ShipType);
+            return {
+              ...ships,
+              entries: { ...ships.entries, [id]: flip(targetShip) },
+            };
           });
         }
         targetNode.style.cursor = "";
@@ -278,19 +273,22 @@ function App() {
       <h1>Морской Бой</h1>
       <div className="App__game-field-wrapper">
         <Zone x={0} y={0} width={GAME_WIDTH} height={GAME_HEIGHT}>
-          <Field x={0} y={2} />
-          <Field x={23} y={2} />
-          <Rect x={12} y={3} width={10} height={10} color="blue" />
-          {ships.map((ship) => (
-            <Ship
-              key={ship.id}
-              {...ship}
-              color="black"
-              isDraggable
-              isDragging={draggingShip === ship.id}
-              onPointerDown={handlePointerDown(ship.id)}
-            />
-          ))}
+          <Field x={11} y={1} />
+          <Rect x={1} y={2} width={9} height={9} color="blue" />
+          {ships.keys
+            .map((shipId) => ships.entries[shipId])
+            .map((ship) => (
+              <Ship
+                key={ship.id}
+                {...ship}
+                x={ship.x}
+                y={ship.y}
+                color="black"
+                isDraggable
+                isDragging={draggingShip === ship.id}
+                onPointerDown={handlePointerDown(ship.id)}
+              />
+            ))}
         </Zone>
       </div>
     </div>
