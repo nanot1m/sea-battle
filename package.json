@@ -2,6 +2,7 @@
   "name": "sea-battle",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://nanot1m.github.io/sea-battle/",
   "dependencies": {
     "@excalidraw/excalidraw": "^0.9.0",
     "cra-template-typescript": "1.1.2",
