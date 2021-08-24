@@ -1,18 +1,27 @@
 import "./App.css";
-import { PointerEventHandler, PointerEvent, ReactNode, useState } from "react";
+import {
+  PointerEventHandler,
+  PointerEvent,
+  ReactNode,
+  useState,
+  Fragment,
+  useMemo,
+} from "react";
+import { unstable_batchedUpdates } from "react-dom";
 import { normalizeById, shiftBy, moveTo, flip, Orientation } from "./lib";
 
 const SQUARE_SIZE = 20;
 const RANGE_1_10 = Array.from(Array(10)).map((_, i) => i + 1);
 const LETTERS = ["а", "б", "в", "г", "д", "е", "ж", "з", "и", "к"];
 
-const GAME_WIDTH = 24;
-const GAME_HEIGHT = 14;
+const GAME_WIDTH = 25;
+const GAME_HEIGHT = 13;
 
 const Colors = {
   blue: "#3399cc",
   black: "#000000",
   red: "#cc0000",
+  gray: "#999999",
 };
 
 function Rect(props: {
@@ -170,14 +179,14 @@ type ShipType = {
 const AVAILABLE_SHIPS: ShipType[] = [
   { size: 4, x: 0, y: 0 },
   { size: 3, x: 0, y: 2 },
-  { size: 3, x: 4, y: 2 },
+  { size: 3, x: 5, y: 2 },
   { size: 2, x: 0, y: 4 },
   { size: 2, x: 3, y: 4 },
-  { size: 2, x: 5, y: 0 },
+  { size: 2, x: 6, y: 0 },
   { size: 1, x: 0, y: 6 },
-  { size: 1, x: 2, y: 6 },
   { size: 1, x: 4, y: 6 },
-  { size: 1, x: 6, y: 4 },
+  { size: 1, x: 7, y: 6 },
+  { size: 1, x: 7, y: 4 },
 ].map((x, idx) => ({
   ...x,
   id: idx,
@@ -186,113 +195,227 @@ const AVAILABLE_SHIPS: ShipType[] = [
 
 function App() {
   const [ships, setShips] = useState(() =>
-    normalizeById(AVAILABLE_SHIPS.map(shiftBy(2, 3)))
+    normalizeById(AVAILABLE_SHIPS.map(shiftBy(2, 2)))
   );
   const [draggingShip, setDraggingShip] = useState<number | null>(null);
 
   const handlePointerDown =
     (id: number) => (downEvent: PointerEvent<SVGElement>) => {
       downEvent.preventDefault();
-      const targetShip = ships.entries[id];
-      if (targetShip == null) {
-        return;
-      }
 
       const targetNode = downEvent.currentTarget;
 
       document.addEventListener("pointermove", moveHandler);
       document.addEventListener("pointerup", upHandler);
 
-      const initialShipX = targetShip.x;
-      const initialShipY = targetShip.y;
-
       let isDragging = false;
+      let targetShipInitX: number;
+      let targetShipInitY: number;
 
       function moveHandler(moveEvent: globalThis.PointerEvent) {
         moveEvent.preventDefault();
-        if (targetShip == null) {
-          return;
-        }
 
         const dx = moveEvent.clientX - downEvent.clientX;
         const dy = moveEvent.clientY - downEvent.clientY;
 
-        if (Math.abs(dx) > SQUARE_SIZE / 2 || Math.abs(dy) > SQUARE_SIZE / 2) {
+        if (Math.abs(dx) > SQUARE_SIZE / 3 || Math.abs(dy) > SQUARE_SIZE / 3) {
           isDragging = true;
           setDraggingShip(id);
           targetNode.style.cursor = "grabbing";
         }
 
         if (isDragging) {
-          const width =
-            targetShip.orientation === "vertical" ? 1 : targetShip.size;
-          const height =
-            targetShip.orientation === "horizontal" ? 1 : targetShip.size;
-
-          const targetX = Math.min(
-            GAME_WIDTH - width - 1,
-            Math.max(0, initialShipX + Math.round(dx / SQUARE_SIZE))
-          );
-          const targetY = Math.min(
-            GAME_HEIGHT - height - 1,
-            Math.max(0, initialShipY + Math.round(dy / SQUARE_SIZE))
-          );
-
-          setShips((ships) => ({
-            ...ships,
-            entries: {
-              ...ships.entries,
-              [id]: moveTo(targetX, targetY)(targetShip),
-            },
-          }));
-        }
-      }
-
-      function upHandler() {
-        if (!isDragging) {
           setShips((ships) => {
             const targetShip = ships.entries[id];
             if (targetShip == null) {
               return ships;
             }
+
+            if (targetShipInitX == null || targetShipInitY == null) {
+              targetShipInitX = targetShip.x;
+              targetShipInitY = targetShip.y;
+            }
+
+            const width =
+              targetShip.orientation === "vertical" ? 1 : targetShip.size;
+            const height =
+              targetShip.orientation === "horizontal" ? 1 : targetShip.size;
+
+            const targetX = Math.min(
+              GAME_WIDTH - width - 1,
+              Math.max(0, targetShipInitX + Math.round(dx / SQUARE_SIZE))
+            );
+            const targetY = Math.min(
+              GAME_HEIGHT - height - 1,
+              Math.max(0, targetShipInitY + Math.round(dy / SQUARE_SIZE))
+            );
+
+            if (targetShip.x === targetX && targetShip.y === targetY) {
+              return ships;
+            }
+
             return {
               ...ships,
-              entries: { ...ships.entries, [id]: flip(targetShip) },
+              entries: {
+                ...ships.entries,
+                [id]: moveTo(targetX, targetY)(targetShip),
+              },
             };
           });
         }
+      }
+
+      function upHandler() {
+        unstable_batchedUpdates(() => {
+          if (!isDragging) {
+            setShips((ships) => {
+              const targetShip = ships.entries[id];
+              if (targetShip == null) {
+                return ships;
+              }
+              return {
+                ...ships,
+                entries: { ...ships.entries, [id]: flip(targetShip) },
+              };
+            });
+          }
+
+          setDraggingShip(null);
+        });
         targetNode.style.cursor = "";
-        setDraggingShip(null);
         document.removeEventListener("pointermove", moveHandler);
         document.removeEventListener("pointerup", upHandler);
       }
     };
 
+  const denormalizedShips = useMemo(
+    () => ships.keys.map((shipId) => ships.entries[shipId]),
+    [ships.keys, ships.entries]
+  );
+
+  const { invalidShips, valid: fieldIsValid } = useMemo(
+    () =>
+      validateField(denormalizedShips, { x: 1, y: 1, width: 10, height: 10 }),
+    [denormalizedShips]
+  );
+
   return (
     <div className="App">
       <h1>Морской Бой</h1>
-      <div className="App__game-field-wrapper">
-        <Zone x={0} y={0} width={GAME_WIDTH} height={GAME_HEIGHT}>
-          <Field x={11} y={1} />
-          <Rect x={1} y={2} width={9} height={9} color="blue" />
-          {ships.keys
-            .map((shipId) => ships.entries[shipId])
-            .map((ship) => (
-              <Ship
-                key={ship.id}
-                {...ship}
-                x={ship.x}
-                y={ship.y}
-                color="black"
-                isDraggable
-                isDragging={draggingShip === ship.id}
-                onPointerDown={handlePointerDown(ship.id)}
-              />
+      <div>
+        <h2>Расстановка кораблей</h2>
+        <div className="App__game-field-wrapper">
+          <Zone x={0} y={0} width={GAME_WIDTH} height={GAME_HEIGHT}>
+            <Field x={0} y={0} />
+
+            {denormalizedShips.map((ship) => (
+              <Fragment key={ship.id}>
+                <Ship
+                  {...ship}
+                  x={ship.x}
+                  y={ship.y}
+                  color={invalidShips.has(ship.id) ? "red" : "blue"}
+                  isDraggable
+                  isDragging={draggingShip === ship.id}
+                  onPointerDown={handlePointerDown(ship.id)}
+                />
+                {draggingShip != null && renderDotsAroundShip(ship)}
+              </Fragment>
             ))}
-        </Zone>
+          </Zone>
+        </div>
       </div>
+      <button disabled={!fieldIsValid}>Готово</button>
     </div>
   );
+}
+
+function renderDotsAroundShip(ship: ShipType) {
+  const dots: ReactNode[] = [];
+  const { x, y, size, orientation } = ship;
+  const width = orientation === "horizontal" ? size : 1;
+  const height = orientation === "vertical" ? size : 1;
+  for (let i = x - 1; i < x + width + 1; i++) {
+    for (let j = y - 1; j < y + height + 1; j++) {
+      if (i >= x && i < x + width && j >= y && j < y + height) {
+        continue;
+      }
+      if (i < 1 || i > 10 || j < 1 || j > 10) {
+        continue;
+      }
+      dots.push(<Circle r={1.5} key={i + "-" + j} x={i} y={j} color="gray" />);
+    }
+  }
+  return dots;
+}
+
+function validateField(
+  ships: ShipType[],
+  fieldRect: { x: number; y: number; width: number; height: number }
+) {
+  const occupiedFields: Record<number, Record<number, number>> = {};
+
+  const invalidShips = new Set<number>();
+
+  for (const ship of ships) {
+    checkShipInsideFieldRect(ship);
+    checkShipIntersectsOccupiedFields(ship);
+    fillOccupiedFields(ship);
+  }
+
+  return {
+    invalidShips,
+    valid: invalidShips.size === 0,
+  };
+
+  function checkShipIntersectsOccupiedFields(ship: ShipType) {
+    const { x, y, size, orientation } = ship;
+    const width = orientation === "horizontal" ? size : 1;
+    const height = orientation === "vertical" ? size : 1;
+    for (let i = x; i < x + width; i++) {
+      for (let j = y; j < y + height; j++) {
+        const tShipId = occupiedFields[j]?.[i];
+        if (tShipId != null && tShipId !== ship.id) {
+          invalidShips.add(ship.id);
+          invalidShips.add(tShipId);
+        }
+      }
+    }
+  }
+
+  function fillOccupiedFields(ship: ShipType) {
+    const { x, y, size, orientation } = ship;
+    const width = orientation === "horizontal" ? size : 1;
+    const height = orientation === "vertical" ? size : 1;
+    for (let i = x - 1; i < x + width + 1; i++) {
+      for (let j = y - 1; j < y + height + 1; j++) {
+        occupiedFields[j] = occupiedFields[j] || {};
+        if (occupiedFields[j][i] == null) {
+          occupiedFields[j][i] = ship.id;
+        }
+      }
+    }
+  }
+
+  function checkShipInsideFieldRect(ship: ShipType) {
+    const { x, y, size, orientation } = ship;
+    const maxY = fieldRect.y + fieldRect.height;
+    const maxX = fieldRect.x + fieldRect.width;
+
+    if (x < fieldRect.x || y < fieldRect.y) {
+      invalidShips.add(ship.id);
+      return;
+    }
+    if (orientation === "vertical") {
+      if (y + size > maxY || x >= maxX) {
+        invalidShips.add(ship.id);
+      }
+    } else {
+      if (y >= maxY || x + size > maxX) {
+        invalidShips.add(ship.id);
+      }
+    }
+  }
 }
 
 export default App;
