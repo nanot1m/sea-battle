@@ -8,7 +8,8 @@ import {
   useMemo,
 } from "react";
 import { unstable_batchedUpdates } from "react-dom";
-import { normalizeById, shiftBy, moveTo, flip, Orientation } from "./lib";
+import { normalizeById, moveTo, flip, Orientation } from "./lib";
+import { useRef } from "react";
 
 const SQUARE_SIZE = 20;
 const RANGE_1_10 = Array.from(Array(10)).map((_, i) => i + 1);
@@ -22,6 +23,7 @@ const Colors = {
   black: "#000000",
   red: "#cc0000",
   gray: "#999999",
+  transparent: "rgba(0,0,0,0)",
 };
 
 function Rect(props: {
@@ -97,7 +99,13 @@ function Zone(props: {
   );
 }
 
-function Symbol(props: { x: number; y: number; children: ReactNode }) {
+function Symbol(props: {
+  x: number;
+  y: number;
+  children: ReactNode;
+  fontSize?: number;
+  color?: keyof typeof Colors;
+}) {
   return (
     <text
       x={props.x * SQUARE_SIZE + SQUARE_SIZE / 2 + 1}
@@ -105,16 +113,64 @@ function Symbol(props: { x: number; y: number; children: ReactNode }) {
       fontFamily="inherit"
       dominantBaseline="middle"
       textAnchor="middle"
-      fontSize={12}
+      fontSize={props.fontSize ?? 12}
+      fill={props.color ?? Colors.black}
     >
       {props.children}
     </text>
   );
 }
 
-function Field({ x, y }: { x: number; y: number }) {
+type Cell = {
+  x: number;
+  y: number;
+};
+
+function Field({
+  x,
+  y,
+  isInteractive = false,
+  onCellClick,
+}: {
+  x: number;
+  y: number;
+  isInteractive?: boolean;
+  onCellClick?: (cell: Cell | null) => void;
+}) {
+  const [hoveredCell, setHoveredCell] = useState<Cell | null>(null);
+
+  function handlePointerMove(e: PointerEvent) {
+    if (!isInteractive) {
+      return;
+    }
+
+    const { top, left } = e.currentTarget.getBoundingClientRect();
+
+    const dx = e.clientX - left;
+    const dy = e.clientY - top;
+
+    const targetX = Math.floor(dx / SQUARE_SIZE);
+    const targetY = Math.floor(dy / SQUARE_SIZE);
+
+    if (targetX < 1 || targetX > 10 || targetY < 1 || targetY > 10) {
+      setHoveredCell(null);
+      return;
+    }
+
+    setHoveredCell({ x: targetX + x, y: targetY + y });
+  }
+
   return (
-    <g>
+    <g
+      onPointerMove={handlePointerMove}
+      onPointerLeave={() => setHoveredCell(null)}
+      onPointerUp={() => {
+        if (!isInteractive) {
+          return;
+        }
+        onCellClick?.(hoveredCell);
+      }}
+    >
       <Rect width={10} height={10} x={x + 1} y={y + 1} color="black" />
       {RANGE_1_10.map((num, idx) => (
         <Symbol key={num} x={x} y={y + idx + 1}>
@@ -126,6 +182,16 @@ function Field({ x, y }: { x: number; y: number }) {
           {letter.toUpperCase()}
         </Symbol>
       ))}
+      {hoveredCell && (
+        <Rect
+          width={1}
+          height={1}
+          x={hoveredCell.x}
+          y={hoveredCell.y}
+          color="transparent"
+          className="Cell Cell--hovered"
+        />
+      )}
     </g>
   );
 }
@@ -176,26 +242,174 @@ type ShipType = {
   orientation: Orientation;
 };
 
-const AVAILABLE_SHIPS: ShipType[] = [
-  { size: 4, x: 0, y: 0 },
-  { size: 3, x: 0, y: 2 },
-  { size: 3, x: 5, y: 2 },
-  { size: 2, x: 0, y: 4 },
-  { size: 2, x: 3, y: 4 },
-  { size: 2, x: 6, y: 0 },
-  { size: 1, x: 0, y: 6 },
-  { size: 1, x: 4, y: 6 },
-  { size: 1, x: 7, y: 6 },
-  { size: 1, x: 7, y: 4 },
-].map((x, idx) => ({
-  ...x,
-  id: idx,
-  orientation: "horizontal",
-}));
+type GameState =
+  | { type: "planning" }
+  | { type: "battle"; ships: ShipType[]; enemyShips: ShipType[] };
 
 function App() {
+  const [gameState, setGameState] = useState<GameState>({ type: "planning" });
+  function renderGameState() {
+    switch (gameState.type) {
+      case "planning":
+        return (
+          <PlanningScreen
+            onReady={(ships: ShipType[]) => {
+              setGameState({
+                type: "battle",
+                ships,
+                enemyShips: generateField({
+                  x: 13,
+                  y: 1,
+                  width: 10,
+                  height: 10,
+                }),
+              });
+            }}
+          />
+        );
+      case "battle":
+        return (
+          <BattleScreen
+            ships={gameState.ships}
+            enemyShips={gameState.enemyShips}
+          />
+        );
+    }
+  }
+
+  return (
+    <div className="App">
+      <h1>Морской Бой</h1>
+      {renderGameState()}
+    </div>
+  );
+}
+
+function BattleScreen(props: { ships: ShipType[]; enemyShips: ShipType[] }) {
+  const [clickedCells, setClickedCells] = useState<Cell[]>([]);
+  const normalizedEnemyShips = useMemo(
+    () => normalizeById(props.enemyShips),
+    [props.enemyShips]
+  );
+
+  const enemyShipPositions = useMemo(() => {
+    const result: Record<number, Record<number, number>> = {};
+    for (const ship of props.enemyShips) {
+      const { x, y, size, orientation } = ship;
+      const width = orientation === "horizontal" ? size : 1;
+      const height = orientation === "vertical" ? size : 1;
+      for (let i = x; i < x + width; i++) {
+        for (let j = y; j < y + height; j++) {
+          result[i] = result[i] || {};
+          result[i][j] = ship.id;
+        }
+      }
+    }
+    return result;
+  }, [props.enemyShips]);
+
+  const destroyedShipsMapRef = useRef<Record<number, number>>({});
+
+  function handleCellClick(cell: Cell | null): void {
+    return setClickedCells((prevClickedCells) => {
+      if (cell == null) return prevClickedCells;
+      if (
+        prevClickedCells.find(
+          (curCell) => curCell.x === cell.x && curCell.y === cell.y
+        )
+      ) {
+        return prevClickedCells;
+      }
+
+      if (enemyShipPositions[cell.x]?.[cell.y] != null) {
+        const id = enemyShipPositions[cell.x][cell.y];
+        destroyedShipsMapRef.current[id] =
+          destroyedShipsMapRef.current[id] || 0;
+        destroyedShipsMapRef.current[id]++;
+
+        if (
+          destroyedShipsMapRef.current[id] ===
+          normalizedEnemyShips.entries[id].size
+        ) {
+          const targetShip = normalizedEnemyShips.entries[id];
+
+          const cellsToAdd = [];
+
+          const { x, y, size, orientation } = targetShip;
+          const width = orientation === "horizontal" ? size : 1;
+          const height = orientation === "vertical" ? size : 1;
+          for (let i = x - 1; i < x + width + 1; i++) {
+            for (let j = y - 1; j < y + height + 1; j++) {
+              if (
+                prevClickedCells.find(({ x, y }) => x === i && y === j) == null
+              ) {
+                cellsToAdd.push({ x: i, y: j });
+              }
+            }
+          }
+
+          if (cellsToAdd.length === 0) {
+            return prevClickedCells;
+          }
+
+          return prevClickedCells.concat(cellsToAdd);
+        }
+      }
+      return prevClickedCells.concat(cell);
+    });
+  }
+
+  return (
+    <div>
+      <h2>Битва!</h2>
+      <div className="App__game-field-wrapper">
+        <Zone x={0} y={0} width={GAME_WIDTH} height={GAME_HEIGHT}>
+          <Field x={0} y={0} />
+          {props.ships.map((ship) => (
+            <Ship
+              key={ship.id}
+              x={ship.x}
+              y={ship.y}
+              size={ship.size}
+              orientation={ship.orientation}
+              color="black"
+            />
+          ))}
+
+          {clickedCells.map((cell) => {
+            if (cell.x < 13 || cell.x > 22 || cell.y < 1 || cell.y > 10)
+              return null;
+
+            return enemyShipPositions[cell.x]?.[cell.y] == null ? (
+              <Circle
+                key={`${cell.x}-${cell.y}`}
+                x={cell.x}
+                y={cell.y}
+                color="red"
+                r={3}
+              />
+            ) : (
+              <Symbol
+                key={`${cell.x}-${cell.y}`}
+                x={cell.x}
+                y={cell.y}
+                color="red"
+                fontSize={15}
+              >
+                X
+              </Symbol>
+            );
+          })}
+          <Field x={12} y={0} isInteractive onCellClick={handleCellClick} />
+        </Zone>
+      </div>
+    </div>
+  );
+}
+
+function PlanningScreen(props: { onReady: (ships: ShipType[]) => void }) {
   const [ships, setShips] = useState(() =>
-    normalizeById(AVAILABLE_SHIPS.map(shiftBy(2, 2)))
+    normalizeById(generateField({ x: 1, y: 1, width: 10, height: 10 }))
   );
   const [draggingShip, setDraggingShip] = useState<number | null>(null);
 
@@ -300,14 +514,12 @@ function App() {
   );
 
   return (
-    <div className="App">
-      <h1>Морской Бой</h1>
+    <>
       <div>
         <h2>Расстановка кораблей</h2>
         <div className="App__game-field-wrapper">
           <Zone x={0} y={0} width={GAME_WIDTH} height={GAME_HEIGHT}>
             <Field x={0} y={0} />
-
             {denormalizedShips.map((ship) => (
               <Fragment key={ship.id}>
                 <Ship
@@ -325,8 +537,26 @@ function App() {
           </Zone>
         </div>
       </div>
-      <button disabled={!fieldIsValid}>Готово</button>
-    </div>
+      <div className="App__buttons">
+        <button
+          onClick={() =>
+            setShips(
+              normalizeById(
+                generateField({ x: 1, y: 1, width: 10, height: 10 })
+              )
+            )
+          }
+        >
+          Расположить случайно
+        </button>
+        <button
+          disabled={!fieldIsValid}
+          onClick={() => props.onReady(denormalizedShips)}
+        >
+          Готово
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -347,6 +577,33 @@ function renderDotsAroundShip(ship: ShipType) {
     }
   }
   return dots;
+}
+
+const sizes = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
+
+function generateField(fieldRect: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}) {
+  const ships: ShipType[] = [];
+
+  for (const size of sizes) {
+    while (true) {
+      const orientation = Math.random() < 0.5 ? "horizontal" : "vertical";
+      const x = Math.floor(Math.random() * (GAME_WIDTH - size + 1));
+      const y = Math.floor(Math.random() * (GAME_HEIGHT - size + 1));
+      ships.push({ x, y, size, orientation, id: ships.length });
+      if (validateField(ships, fieldRect).valid) {
+        break;
+      } else {
+        ships.pop();
+      }
+    }
+  }
+
+  return ships;
 }
 
 function validateField(

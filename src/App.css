@@ -37,7 +37,19 @@
   cursor: grab;
 }
 
+.Cell--hovered {
+  fill: rgba(0, 0, 255, 0.1);
+  cursor: crosshair;
+}
+
 .Ship--dragging {
   fill: rgba(0, 0, 255, 0.1);
   stroke-width: 3px;
+}
+
+.App__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
 }
