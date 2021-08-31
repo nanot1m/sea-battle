@@ -1,4 +1,8 @@
-# Getting Started with Create React App
+# Морской бой
+
+<img width="524" alt="image" src="https://user-images.githubusercontent.com/9278185/131427632-c9c44c4d-70fb-4b95-a542-f738b1833c3b.png">
+
+---
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
